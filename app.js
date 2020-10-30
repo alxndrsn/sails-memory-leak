@@ -1,54 +1,81 @@
-/**
- * app.js
- *
- * Use `app.js` to run your app without `sails lift`.
- * To start the server, run: `node app.js`.
- *
- * This is handy in situations where the sails CLI is not relevant or useful,
- * such as when you deploy to a server, or a PaaS like Heroku.
- *
- * For example:
- *   => `node app.js`
- *   => `npm start`
- *   => `forever start app.js`
- *   => `node debug app.js`
- *
- * The same command-line arguments and env vars are supported, e.g.:
- * `NODE_ENV=production node app.js --port=80 --verbose`
- *
- * For more information see:
- *   https://sailsjs.com/anatomy/app.js
- */
-
-
 // Ensure we're in the project directory, so cwd-relative paths work as expected
 // no matter where we actually lift from.
 // > Note: This is not required in order to lift, but it is a convenient default.
+require('./include-all-monkeypatch');
+
+if(!global.gc) {
+  console.error(`
+  Please run with node's --expose-gc flag set.
+`);
+  process.exit(1);
+}
+
 process.chdir(__dirname);
 
+const TRACE = false;
+const INFO = true;
+const trace = (...args) => TRACE && console.log(...args);
+const info  = (...args) => INFO  && console.log(...args);
 
+async function lift(sails) {
+  trace('lift() :: ENTRY');
 
-// Attempt to import `sails` dependency, as well as `rc` (for loading `.sailsrc` files).
-var sails;
-var rc;
-try {
-  sails = require('sails');
-  rc = require('sails/accessible/rc');
-} catch (err) {
-  console.error('Encountered an error when attempting to require(\'sails\'):');
-  console.error(err.stack);
-  console.error('--');
-  console.error('To run an app using `node app.js`, you need to have Sails installed');
-  console.error('locally (`./node_modules/sails`).  To do that, just make sure you\'re');
-  console.error('in the same directory as your app and run `npm install`.');
-  console.error();
-  console.error('If Sails is installed globally (i.e. `npm install -g sails`) you can');
-  console.error('also run this app with `sails lift`.  Running with `sails lift` will');
-  console.error('not run this file (`app.js`), but it will do exactly the same thing.');
-  console.error('(It even uses your app directory\'s local Sails install, if possible.)');
-  return;
-}//-•
+  return new Promise((resolve, reject) => {
+    sails.lift({ log:{ noShip:true } }, err => {
+      if(err) {
+        trace('lift() :: FAILED', err);
+        return reject(err);
+      }
 
+      trace('lift() :: SUCCEEDED');
 
-// Start server
-sails.lift(rc('sails'));
+      resolve();
+    });
+  });
+}
+
+async function lower(sails) {
+  trace('lower() :: ENTRY');
+
+  return new Promise((resolve, reject) => {
+    sails.lower(err => {
+      if(err) {
+        trace('lower() :: FAILED', err);
+        return reject(err);
+      }
+
+      trace('lower() :: SUCCEEDED');
+
+      resolve();
+    });
+  });
+}
+
+let lastHeap;
+let invocation = 0;
+
+(async () => {
+  trace('Starting...');
+  try {
+    const { Sails } = require('sails');
+    while(true) {
+      const sails = new Sails();
+      await lift(sails);
+      await lower(sails);
+      gc();
+
+      const used = process.memoryUsage().heapUsed;
+      info((++invocation).toString().padStart(12, ' '),
+          `| Process uses ${asMb(used).padStart(10, ' ')}\tchange: ${asMb(used - lastHeap)}`);
+      lastHeap = used;
+    }
+  } catch(err) {
+    console.error(err);
+  }
+})();
+
+function asMb(mem) {
+  if(isNaN(mem)) return '??? MB';
+  mem = mem / 1024 / 1024;
+  return `${Math.round(mem * 100) / 100} MB`;
+}

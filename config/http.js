@@ -40,6 +40,10 @@ module.exports.http = {
     //   'favicon',
     // ],
 
+    // cookieParser doesn't work if includeAll.flatten is forced to `false` when
+    // loading the config/ directory, so we disable it here.
+    cookieParser: false,
+
 
     /***************************************************************************
     *                                                                          *
